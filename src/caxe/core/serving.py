@@ -111,7 +111,7 @@ class VerifyEnd(doing.DoDoer):
 
         rep.status = falcon.HTTP_200
         rep.content_type = "text/html"
-        rep.data = "poop"
+        rep.data = b'test'
 
     def requestDo(self, tymth=None, tock=0.0):
         """

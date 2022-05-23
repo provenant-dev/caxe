@@ -5,9 +5,6 @@ keri.kli.commands module
 """
 import argparse
 
-import falcon
-from hio.base import doing
-from hio.core import http
 from keri.app import keeping, habbing, directing
 from keri.app.cli.common import existing
 
