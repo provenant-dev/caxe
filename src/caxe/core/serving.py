@@ -5,6 +5,7 @@ caxe.core.serving module
 
 """
 import json
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from urllib import parse
@@ -23,20 +24,22 @@ from lxml import html, etree
 
 logger = help.ogler.getLogger()
 
+
 @dataclass
 class Report:
-    data: bytes
-    said: str
-    start: datetime
-    creds: list
+    uuid: str
+    data: bytes = None
+    said: str = None
+    start: datetime = None
+    creds: list = None
     saids: list = None
     result: dict = None
+    clientDoer: http.ClientDoer = None
 
 
 @dataclass
 class Cred:
     link: str
-    client: http.Client = None
     clientDoer: http.ClientDoer = None
     said: str = ""
 
@@ -44,30 +47,34 @@ class Cred:
 class VerifyEnd(doing.DoDoer):
 
     def __init__(self, hby, hab, kvy, rvy, tvy, vry):
+        self.ims = bytearray()
         self.hby = hby
         self.hab = hab
         self.kvy = kvy
         self.tvy = tvy
         self.rvy = rvy
         self.vry = vry
+        self.pages = decking.Deck()
         self.requests = decking.Deck()
         self.requested = decking.Deck()
         self.parsed = decking.Deck()
         self.complete = decking.Deck()
         self.failed = decking.Deck()
 
-        self.parser = parsing.Parser(framed=True,
+        self.parser = parsing.Parser(ims=self.ims,
+                                     framed=True,
                                      kvy=kvy,
                                      tvy=tvy,
                                      rvy=rvy,
                                      vry=vry)
 
-        doers = []
+        doers = [doing.doify(self.getDo), doing.doify(self.requestDo), doing.doify(self.requestedDo),
+                 doing.doify(self.parsedDo), doing.doify(self.msgDo), doing.doify(self.escrowDo)]
 
         super(VerifyEnd, self).__init__(doers=doers)
 
-    def on_post(self, req, rep):
-        """ Verify POST endpoint
+    def on_get(self, req, rep):
+        """ Verify GET endpoint
 
         Parameters:
             req: falcon.Request HTTP request
@@ -79,19 +86,54 @@ class VerifyEnd(doing.DoDoer):
         tags:
            - Verify
         parameters:
-          - in: path
-            name: said
+          - in: query
+            name: url
             schema:
               type: string
             required: true
-            description: qb64 self-addressing identifier of schema to get
+            description: ViRA ACDC Credential OOBI URL
         responses:
            200:
-              description: Schema JSON successfully returned
+              description: ViRA attributes section with associated vLEI credentials
            404:
-              description: No schema found for SAID
+              description: No credentials found
         """
+        url = req.params.get("url")
+        purl = parse.urlparse(url)
+        client = http.clienting.Client(hostname=purl.hostname, port=purl.port)
+        clientDoer = http.clienting.ClientDoer(client=client)
+        self.extend([clientDoer])
 
+        client.request(
+            method="GET",
+            path=purl.path,
+            qargs=parse.parse_qs(purl.query),
+        )
+
+        uuid = coring.randomNonce()
+        rpt = Report(uuid=uuid, clientDoer=clientDoer)
+        self.pages.append(rpt)
+
+        rep.stream = ReportIterable(uuid=uuid, complete=self.complete, failed=self.failed)
+
+    def on_post(self, req, rep):
+        """ Verify POST endpoint
+
+        Parameters:
+            req: falcon.Request HTTP request
+            rep: falcon.Response HTTP response
+
+       ---
+        summary:  Verify all ViRA credential links
+        description:  Verify all ViRA credential links
+        tags:
+           - Verify
+        responses:
+           200:
+              description: ViRA attributes section with associated vLEI credentials
+           404:
+              description: No credentials found
+        """
         data = req.bounded_stream.read()
         root = html.document_fromstring(data)
         links = root.xpath(".//link[@type='application/json+acdc']")
@@ -105,13 +147,69 @@ class VerifyEnd(doing.DoDoer):
         raw = blake3.blake3(xmld.encode("utf-8")).digest()
         diger = coring.Diger(raw=raw)
 
-        creds = [Cred(link=link.attribute("href")) for link in links]
-        rpt = Report(data=data, said=diger.qb64, start=helping.nowUTC(), creds=creds)
+        creds = [Cred(link=link.attrib["href"]) for link in links]
+        uuid = coring.randomNonce()
+        rpt = Report(uuid=uuid, data=data, said=diger.qb64, start=helping.nowUTC(), creds=creds)
         self.requests.append(rpt)
 
-        rep.status = falcon.HTTP_200
-        rep.content_type = "text/html"
-        rep.data = b'test'
+        rep.stream = ReportIterable(uuid=uuid, complete=self.complete, failed=self.failed)
+
+    def getDo(self, tymth=None, tock=0.0):
+        """
+        Returns doifiable Doist for processing requests for report verification
+
+        This method creates HTTP requests for the credential OOBIs and sends them.
+
+        Parameters:
+            tymth (function): injected function wrapper closure returned by .tymen() of
+                Tymist instance. Calling tymth() returns associated Tymist .tyme.
+            tock (float): injected initial tock value
+
+        Usage:
+            add result of doify on this method to doers list
+        """
+        self.wind(tymth)
+        self.tock = tock
+        _ = (yield self.tock)
+
+        while True:
+            if not self.pages:
+                yield self.tock
+
+            while self.pages:
+                rpt = self.pages.popleft()
+                if rpt.clientDoer.client.responses:
+                    response = rpt.clientDoer.client.responses.popleft()
+                    self.remove([rpt.clientDoer])
+                    rpt = Report(data=b'', said="", start=helping.nowUTC(), creds=[])
+
+                    if not response["status"] == 200:
+                        rpt.result = dict(msg="Invalid reponse from page")
+                        self.failed.append(rpt)
+                        continue
+
+                    data = response['body'].encode("utf-8")
+                    root = html.document_fromstring(data)
+                    links = root.xpath(".//link[@type='application/json+acdc']")
+                    if len(links) == 0:
+                        rpt.result = dict(msg="No links found on page")
+                        self.failed.append(rpt)
+                        continue
+
+                    xmld = etree.canonicalize(data.decode("utf-8"))
+                    raw = blake3.blake3(xmld.encode("utf-8")).digest()
+                    diger = coring.Diger(raw=raw)
+
+                    creds = [Cred(link=link.attribute("href")) for link in links]
+                    rpt.data = data
+                    rpt.said = diger.qb64
+                    rpt.cred = creds
+
+                    self.requests.append(rpt)
+                else:
+                    self.pages.append(rpt)
+
+                yield self.tock
 
     def requestDo(self, tymth=None, tock=0.0):
         """
@@ -137,7 +235,6 @@ class VerifyEnd(doing.DoDoer):
 
             while self.requests:
                 report = self.requests.popleft()
-
                 for cred in report.creds:
                     purl = parse.urlparse(cred.link)
                     cred.said = purl.path.lstrip('/oobi/')
@@ -146,9 +243,7 @@ class VerifyEnd(doing.DoDoer):
                     clientDoer = http.clienting.ClientDoer(client=client)
                     self.extend([clientDoer])
 
-                    cred.client = client
                     cred.clientDoer = clientDoer
-
                     client.request(
                         method="GET",
                         path=purl.path,
@@ -156,6 +251,8 @@ class VerifyEnd(doing.DoDoer):
                         )
 
                 self.requested.append(report)
+
+                yield self.tock
 
     def requestedDo(self, tymth, tock=0.0):
         """ Process Client responses by parsing the messages and removing the client/doer
@@ -173,20 +270,19 @@ class VerifyEnd(doing.DoDoer):
         while True:
             while self.requested:
                 report = self.requested.popleft()
-
                 for cred in report.creds:
-                    if cred.client is not None and cred.client.responses:
-                        response = cred.client.responses.popleft()
+                    if cred.clientDoer is not None and cred.clientDoer.client.responses:
+                        response = cred.clientDoer.client.responses.popleft()
                         self.remove([cred.clientDoer])
 
-                        if not response["status"] == 200:
+                        if not (response["status"] == 200):
                             report.result = dict(msg=f"Invalid reponse from credential link: {cred.link}")
                             self.failed.append(report)
                             continue
 
-                        if response["headers"]["Content-Type"] == "application/json+acdc":
-                            self.parser.parse(ims=bytearray(response["body"]))
-                            cred.client = None
+                        if response["headers"]["Content-Type"] == "application/acdc+json":
+                            self.ims.extend(bytearray(response["body"]))
+                            cred.clientDoer = None
                         else:
                             report.result = dict(msg=f"Invalid reponse from credential link: {cred.link}")
                             self.failed.append(report)
@@ -194,7 +290,7 @@ class VerifyEnd(doing.DoDoer):
 
                 complete = True
                 for cred in report.creds:
-                    if cred.client is not None:
+                    if cred.clientDoer is not None:
                         complete = False
 
                 if complete:
@@ -222,27 +318,38 @@ class VerifyEnd(doing.DoDoer):
         while True:
             while self.parsed:
                 report = self.parsed.popleft()
-
                 results = dict()
+
+                complete = True
+                failed = False
                 for cred in report.creds:
-                    creder = self.vry.reger.saved.get(keys=cred.said)
-                    if creder is None:
-                        self.parsed.append(report)
+                    said = self.vry.reger.saved.get(keys=cred.said)
+                    if said is None:
+                        complete = False
                         continue
 
+                    creder = self.vry.reger.creds.get(keys=(said.qb64,))
                     attrs = creder.crd["a"]
-                    if "rd" in attrs:
+                    if "rd" not in attrs:
+                        complete = False
                         continue
 
                     if attrs["rd"] != report.said:
-                        report.result = dict(msg=f"Report SAID in credential {attrs['rf']} does not match "
+                        report.result = dict(msg=f"Report SAID in credential {attrs['rd']} does not match "
                                                  f"actual SAID {report.said} for credential {creder.said}")
                         self.failed.append(report)
+                        failed = True
                     # TODO: validate individual facts
 
                     results[creder.said] = attrs
 
-                self.complete.append(report)
+                if failed:
+                    continue
+                elif complete:
+                    report.results = results
+                    self.complete.append(report)
+                else:
+                    self.parsed.append(report)
 
                 yield self.tock
 
@@ -302,38 +409,86 @@ def setup(hby, alias, httpPort):
     if hab is None:
         hab = hby.makeHab(name=alias, transferable=True)
 
+    print(f"Using hab {hab.name}:{hab.pre}")
     reger = viring.Reger(name=hab.name, db=hab.db, temp=False)
     verfer = verifying.Verifier(hby=hby, reger=reger)
 
-    cues = []
-    rvy = routing.Revery(db=hby.db, cues=cues)
+    rvy = routing.Revery(db=hby.db)
     kvy = eventing.Kevery(db=hby.db,
                           lax=True,
                           local=False,
-                          rvy=rvy,
-                          cues=cues)
+                          rvy=rvy)
     kvy.registerReplyRoutes(router=rvy.rtr)
 
     tvy = Tevery(reger=verfer.reger,
                  db=hby.db,
-                 local=False,
-                 cues=cues)
+                 local=False)
 
     tvy.registerReplyRoutes(router=rvy.rtr)
 
-    app = falcon.App()
+    app = falcon.App(middleware=falcon.CORSMiddleware(
+        allow_origins='*', allow_credentials='*', expose_headers=['cesr-attachment', 'cesr-date', 'content-type']))
     server = http.Server(port=httpPort, app=app)
     httpServerDoer = http.ServerDoer(server=server)
 
     doers = []
-    doers += loadEnds(app, hby, hab, kvy, tvy, rvy, verfer)
+    doers += loadEnds(app=app, hby=hby, hab=hab, kvy=kvy, tvy=tvy, rvy=rvy, vry=verfer)
     doers.extend([httpServerDoer])
 
     return doers
 
 
 def loadEnds(app, hby, hab, kvy, tvy, rvy, vry):
-    verifyEnd = VerifyEnd(hby, hab, kvy, tvy, rvy, vry)
+    verifyEnd = VerifyEnd(hby=hby, hab=hab, kvy=kvy, tvy=tvy, rvy=rvy, vry=vry)
     app.add_route("/verify", verifyEnd)
 
     return [verifyEnd]
+
+
+class ReportIterable:
+
+    TimeoutReport = 10
+
+    def __init__(self, uuid, complete, failed):
+        self.uuid = uuid
+        self.complete = complete
+        self.failed = failed
+        self.done = False
+
+    def __iter__(self):
+        self.start = self.end = time.perf_counter()
+        return self
+
+    def __next__(self):
+
+        if self.done:
+            raise StopIteration
+
+        if self.end - self.start < self.TimeoutReport:
+            if self.start == self.end:
+                self.end = time.perf_counter()
+                return b''
+
+            if self.complete:
+                rpt = self.complete.popleft()
+                if rpt.uuid == self.uuid:
+                    data = json.dumps(rpt.result)
+                    self.done = True
+                    return f"HTTP/1.1 200 OK\nContent-Length: {len(data)}\nContent-Type: application/json\n" \
+                           f"{data}\n\n".encode("utf-8")
+                else:
+                    self.complete.append(rpt)
+                    return b''
+
+            if self.failed:
+                rpt = self.failed.popleft()
+                if rpt.uuid == self.uuid:
+                    data = json.dumps(rpt.result)
+                    self.done = True
+                    return f"HTTP/1.1 500 FAILED\nContent-Length: {len(data)}\nContent-Type: application/json\
+                    n{data}\n\n".encode("utf-8")
+
+            self.end = time.perf_counter()
+            return b''
+
+        raise StopIteration

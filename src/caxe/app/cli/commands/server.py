@@ -5,8 +5,8 @@ keri.kli.commands module
 """
 import argparse
 
-from keri.app import keeping, habbing, directing
-from keri.app.cli.common import existing
+from keri.app import keeping, habbing, directing, configing
+from keri.app.cli.common import existing, oobiing
 
 from caxe.core import serving
 
@@ -26,6 +26,12 @@ parser.add_argument('--base', '-b', help='additional optional prefix to file loc
 parser.add_argument('--alias', '-a', help='human readable alias for the new identifier prefix', required=True)
 parser.add_argument('--passcode', help='22 character encryption passcode for keystore (is not saved)',
                     dest="bran", default=None)  # passcode => bran
+parser.add_argument("--config-dir", "-c", dest="configDir", help="directory override for configuration data")
+parser.add_argument('--config-file',
+                    dest="configFile",
+                    action='store',
+                    default=None,
+                    help="configuration filename override")
 
 
 def launch(args, expire=0.0):
@@ -34,6 +40,8 @@ def launch(args, expire=0.0):
     bran = args.bran
     htp = args.http
     alias = args.alias
+    configFile = args.configFile
+    configDir = args.configDir
 
     ks = keeping.Keeper(name=name,
                         base=base,
@@ -43,15 +51,26 @@ def launch(args, expire=0.0):
     aeid = ks.gbls.get('aeid')
 
     if aeid is None:
-        hby = habbing.Habery(name=name, base=base, bran=bran)
+        if configFile is not None:
+            cf = configing.Configer(name=configFile,
+                                    base=base,
+                                    headDirPath=configDir,
+                                    temp=False,
+                                    reopen=True,
+                                    clear=False)
+
+        hby = habbing.Habery(name=name, base=base, bran=bran, cf=cf)
     else:
         hby = existing.setupHby(name=name, base=base, bran=bran)
 
     hbyDoer = habbing.HaberyDoer(habery=hby)  # setup doer
-    doers = [hbyDoer]
+    obl = oobiing.OobiLoader(hby=hby, auto=True)
 
-    serving.setup(hby, alias, htp)
+    doers = [hbyDoer, obl]
 
+    doers += serving.setup(hby, alias, htp)
+
+    print(f"Caxe Server listening on {htp}")
     directing.runController(doers=doers, expire=expire)
 
 
