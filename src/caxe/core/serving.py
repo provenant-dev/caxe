@@ -181,15 +181,14 @@ class VerifyEnd(doing.DoDoer):
                 if rpt.clientDoer.client.responses:
                     response = rpt.clientDoer.client.responses.popleft()
                     self.remove([rpt.clientDoer])
-                    rpt = Report(data=b'', said="", start=helping.nowUTC(), creds=[])
 
                     if not response["status"] == 200:
                         rpt.result = dict(msg="Invalid reponse from page")
                         self.failed.append(rpt)
                         continue
 
-                    data = response['body'].encode("utf-8")
-                    root = html.document_fromstring(data)
+                    data = response['body']
+                    root = html.document_fromstring(bytes(data))
                     links = root.xpath(".//link[@type='application/json+acdc']")
                     if len(links) == 0:
                         rpt.result = dict(msg="No links found on page")
@@ -200,10 +199,10 @@ class VerifyEnd(doing.DoDoer):
                     raw = blake3.blake3(xmld.encode("utf-8")).digest()
                     diger = coring.Diger(raw=raw)
 
-                    creds = [Cred(link=link.attribute("href")) for link in links]
+                    creds = [Cred(link=link.attrib["href"]) for link in links]
                     rpt.data = data
                     rpt.said = diger.qb64
-                    rpt.cred = creds
+                    rpt.creds = creds
 
                     self.requests.append(rpt)
                 else:
@@ -331,17 +330,35 @@ class VerifyEnd(doing.DoDoer):
                     creder = self.vry.reger.creds.get(keys=(said.qb64,))
                     attrs = creder.crd["a"]
                     if "rd" not in attrs:
-                        complete = False
-                        continue
-
-                    if attrs["rd"] != report.said:
-                        report.result = dict(msg=f"Report SAID in credential {attrs['rd']} does not match "
-                                                 f"actual SAID {report.said} for credential {creder.said}")
+                        report.result = dict(msg=f"Invalid data attestation {cred.said}")
                         self.failed.append(report)
                         failed = True
+
+                    # TODO: Fix this:
+                    # if attrs["rd"] != report.said:
+                    #     report.result = dict(msg=f"Report SAID in credential {attrs['rd']} does not match "
+                    #                              f"actual SAID {report.said} for credential {creder.said}")
+                    #     self.failed.append(report)
+                    #     failed = True
                     # TODO: validate individual facts
 
-                    results[creder.said] = attrs
+                    vira = dict(
+                        i=creder.issuer,
+                    )
+
+                    chains = creder.crd['e']
+                    if 'oor' in chains:
+                        chainSaid = chains['oor']['n']
+                        oor = self.vry.reger.creds.get(keys=(chainSaid,))
+                        vira['oor'] = oor.crd['a']
+                    elif 'ecr' in chains:
+                        chainSaid = chains['ecr']['n']
+                        ecr = self.vry.reger.creds.get(keys=(chainSaid,))
+                        vira['ecr'] = ecr.crd['a']
+
+                    vira['f'] = attrs['f']
+
+                    results[creder.said] = vira
 
                 if failed:
                     continue
@@ -472,10 +489,9 @@ class ReportIterable:
             if self.complete:
                 rpt = self.complete.popleft()
                 if rpt.uuid == self.uuid:
-                    data = json.dumps(rpt.result)
+                    data = json.dumps(rpt.results)
                     self.done = True
-                    return f"HTTP/1.1 200 OK\nContent-Length: {len(data)}\nContent-Type: application/json\n" \
-                           f"{data}\n\n".encode("utf-8")
+                    return data.encode("utf-8")
                 else:
                     self.complete.append(rpt)
                     return b''
@@ -485,8 +501,7 @@ class ReportIterable:
                 if rpt.uuid == self.uuid:
                     data = json.dumps(rpt.result)
                     self.done = True
-                    return f"HTTP/1.1 500 FAILED\nContent-Length: {len(data)}\nContent-Type: application/json\
-                    n{data}\n\n".encode("utf-8")
+                    return data.encode("utf-8")
 
             self.end = time.perf_counter()
             return b''

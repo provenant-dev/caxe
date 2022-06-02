@@ -82,7 +82,7 @@ def handler(args):
 
         values.append(attr)
 
-    a['a'] = values
+    a['f'] = values
     _, a = coring.Saider.saidify(sad=a)
 
     json.dump(a, out, indent=2)

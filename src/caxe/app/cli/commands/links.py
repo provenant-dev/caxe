@@ -7,7 +7,7 @@ import argparse
 
 from lxml import html
 
-parser = argparse.ArgumentParser(description='Extract attributes section')
+parser = argparse.ArgumentParser(description='Extract HTML link elements')
 parser.set_defaults(handler=lambda args: handler(args),
                     transferable=True)
 parser.add_argument('--file', '-f', help='File to load and extract', default="", required=True)
