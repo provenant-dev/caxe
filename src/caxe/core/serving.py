@@ -15,6 +15,7 @@ import falcon
 from hio.base import doing
 from hio.core import http
 from hio.help import decking
+from caxe.core import reporting
 from keri import help
 from keri.core import coring, routing, eventing, parsing
 from keri.help import helping
@@ -420,7 +421,7 @@ class VerifyEnd(doing.DoDoer):
             yield
 
 
-def setup(hby, alias, httpPort):
+def setup(hby, alias, httpPort, httpHost):
     # make hab
     hab = hby.habByName(name=alias)
     if hab is None:
@@ -445,7 +446,7 @@ def setup(hby, alias, httpPort):
 
     app = falcon.App(middleware=falcon.CORSMiddleware(
         allow_origins='*', allow_credentials='*', expose_headers=['cesr-attachment', 'cesr-date', 'content-type']))
-    server = http.Server(port=httpPort, app=app)
+    server = http.Server(host=httpHost, port=httpPort, app=app)
     httpServerDoer = http.ServerDoer(server=server)
 
     doers = []
@@ -458,6 +459,8 @@ def setup(hby, alias, httpPort):
 def loadEnds(app, hby, hab, kvy, tvy, rvy, vry):
     verifyEnd = VerifyEnd(hby=hby, hab=hab, kvy=kvy, tvy=tvy, rvy=rvy, vry=vry)
     app.add_route("/verify", verifyEnd)
+
+    reporting.loadEnds(app=app)
 
     return [verifyEnd]
 
