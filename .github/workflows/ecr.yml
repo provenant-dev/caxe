@@ -1,0 +1,81 @@
+# This workflow will be triggered by an external file.
+# This workflow is used to upload the build image to ECR
+name: No, Not this one.
+
+on:
+  workflow_call:
+    inputs:
+      IMAGE_TAG:
+        description: Tag of build image
+        required: true
+        type: string
+      build_env:
+        description: Build Environment
+        required: true
+        type: string
+      AWS_REGION:
+        description: AWS Region where image will be pushed
+        type: string
+        required: true
+      ROLE_ARN:
+        description: AWS Role ARN
+        required: true
+        type: string
+      REPOSITORY:
+        description: ECR Repository name where image will be pushed
+        required: true
+        type: string
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: ${{ inputs.IMAGE_TAG }}
+          path: /tmp
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.ROLE_ARN }}
+          aws-region: ${{ inputs.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Load & Re-Tag Docker Image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: ${{ inputs.REPOSITORY }}
+          IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
+        run: |
+          docker load --input /tmp/$IMAGE_TAG.tar
+          docker tag $IMAGE_TAG $REGISTRY/$REPOSITORY:$IMAGE_TAG
+
+      - name: Push docker image to Amazon ECR
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: ${{ inputs.REPOSITORY }}
+          IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
+        run: |
+          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+
+      - name: Scan Docker image
+        id: docker-scan
+        continue-on-error: true
+        uses: alexjurkiewicz/ecr-scan-image@v1.7.1
+        with:
+          repository: ${{ inputs.REPOSITORY }}
+          tag: ${{ inputs.IMAGE_TAG }}
+          fail_threshold: high
+      
+      - name: Show Scan Result
+        run: echo "${{ steps.docker-scan.outputs.total }} total vulnerabilities."
