@@ -1,0 +1,91 @@
+name: Build & Publish CAXE to ECR
+
+on:
+  push:
+    # branches: [ "main" ]
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: Branch to build from
+        default: main
+        required: true
+
+env:
+  ECR_REPO: caxe
+
+jobs:
+  build_image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.inputs.branch_name }}
+
+      - name: Set tag as release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: echo $GITHUB_REF | grep -oP 'refs/tags/\K.*' | sed 's/^/RELEASE_VERSION=/' >> $GITHUB_ENV
+
+      - name: Set git hash as release version
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          GIT_HASH=$(git rev-parse HEAD)
+          echo RELEASE_VERSION=${GIT_HASH:0:7} >> $GITHUB_ENV
+      - name: Set Output
+        id: build_job_output
+        run: |
+          echo "RELEASE_VERSION=${{ env.RELEASE_VERSION }}" >> $GITHUB_OUTPUT
+          echo "ECR_REPO=${{ env.ECR_REPO }}" >> $GITHUB_OUTPUT
+
+      - name: Build Docker Image
+        env:
+          IMAGE_TAG: ${{ env.RELEASE_VERSION }}
+        run: |
+          docker build --file Dockerfile -t $IMAGE_TAG .
+          docker save -o /tmp/$IMAGE_TAG.tar $IMAGE_TAG
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.RELEASE_VERSION }}
+          path: /tmp/${{ env.RELEASE_VERSION }}.tar
+          retention-days: 1
+    outputs:
+      ECR_REPO: ${{ steps.build_job_output.outputs.ECR_REPO }}
+      RELEASE_VERSION: ${{ steps.build_job_output.outputs.RELEASE_VERSION }}
+
+
+  dev_ecr_publish:
+    needs: build_image
+    # if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/ecr.yml
+    with:
+      build_env: dev
+      AWS_REGION: ${{ vars.DEV_AWS_REGION }}
+      ROLE_ARN: ${{ vars.DEV_ROLE_ARN }}
+      IMAGE_TAG: ${{ needs.build_image.outputs.RELEASE_VERSION }}
+      REPOSITORY: ${{ needs.build_image.outputs.ECR_REPO }}
+
+  stage_ecr_publish:
+    needs: build_image
+    if: ${{ (startsWith(github.ref, 'refs/tags/v')) && (vars.STAGE_ROLE_ARN != '') }}
+    uses: ./.github/workflows/ecr.yml
+    with:
+      build_env: stage
+      AWS_REGION: ${{ vars.STAGE_AWS_REGION }}
+      ROLE_ARN: ${{ vars.STAGE_ROLE_ARN }}
+      IMAGE_TAG: ${{ needs.build_image.outputs.RELEASE_VERSION }}
+      REPOSITORY: ${{ needs.build_image.outputs.ECR_REPO }}
+  
+  prod_ecr_publish:
+    needs: build_image
+    if: ${{ (startsWith(github.ref, 'refs/tags/v')) && (vars.PROD_ROLE_ARN != '') }}
+    uses: ./.github/workflows/ecr.yml
+    with:
+      build_env: prod
+      AWS_REGION: ${{ vars.PROD_AWS_REGION }}
+      ROLE_ARN: ${{ vars.PROD_ROLE_ARN }}
+      IMAGE_TAG: ${{ needs.build_image.outputs.RELEASE_VERSION }}
+      REPOSITORY: ${{ needs.build_image.outputs.ECR_REPO }}
