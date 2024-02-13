@@ -71,7 +71,7 @@ setup(
     ],
     python_requires='>=3.10.3',
     install_requires=[
-        'keri @ git+https://git@github.com/provenant-dev/keripy.git@main',
+        'keri @ git+https://git@github.com/provenant-dev/keripy.git@prod',
         'hio>=0.6.8',
         'multicommand>=1.0.0',
         'arelle-release>=1.0.0',
