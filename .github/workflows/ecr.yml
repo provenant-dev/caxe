@@ -36,20 +36,20 @@ jobs:
     
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: ${{ inputs.IMAGE_TAG }}
           path: /tmp
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885  # v6
         with:
           role-to-assume: ${{ inputs.ROLE_ARN }}
           aws-region: ${{ inputs.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@fa648b43de3d4d023bcb3f89ed6940096949c419  # v2
 
       - name: Load & Re-Tag Docker Image
         env:
@@ -71,7 +71,7 @@ jobs:
       - name: Scan Docker image
         id: docker-scan
         continue-on-error: true
-        uses: alexjurkiewicz/ecr-scan-image@v1.7.1
+        uses: alexjurkiewicz/ecr-scan-image@a17ece3facc44123372a2521011a557c18624d5a  # v3
         with:
           repository: ${{ inputs.REPOSITORY }}
           tag: ${{ inputs.IMAGE_TAG }}
